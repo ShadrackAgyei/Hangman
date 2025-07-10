@@ -8,6 +8,13 @@
   "scripts": {
     "start:backend": "cd backend && npm run dev",
     "start:frontend": "cd frontend && npm start",
-    "install:all": "cd backend && npm install && cd ../frontend && npm install"
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "build": "cd frontend && npm run build",
+    "start": "cd backend && npm start",
+    "postinstall": "npm run install:all && npm run build"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
   }
 } 

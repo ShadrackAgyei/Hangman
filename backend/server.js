@@ -1,18 +1,39 @@
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
+const path = require('path');
 const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
+
+// Configure CORS for production
+const allowedOrigins = process.env.NODE_ENV === 'production' 
+  ? [process.env.FRONTEND_URL || 'https://your-app-name.onrender.com']
+  : ['http://localhost:3000'];
+
 const io = new Server(server, {
   cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
+    origin: allowedOrigins,
+    methods: ['GET', 'POST'],
+    credentials: true
   }
 });
 
-app.use(cors());
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true
+}));
+
+// Serve static frontend files in production
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, '../frontend/build')));
+  
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
+  });
+}
+
 app.get('/health', (req, res) => res.send('OK'));
 
 // In-memory store for rooms and users
@@ -292,13 +313,13 @@ function startTurnTimer(roomCode) {
     return;
   }
   const game = room.game;
-  game.timerEnd = Date.now() + 30000;
+  game.timerEnd = Date.now() + 5000;
   console.log('Emitting timerUpdate to room:', roomCode, 'timerEnd:', game.timerEnd);
   io.to(roomCode).emit('timerUpdate', { timerEnd: game.timerEnd });
   game.timer = setTimeout(() => {
     console.log('Timer expired for room:', roomCode);
     nextTurn(roomCode, true);
-  }, 30000);
+  }, 5000);
 }
 
 function nextTurn(roomCode, skip = false) {
@@ -306,7 +327,12 @@ function nextTurn(roomCode, skip = false) {
   if (!room || !room.game) return;
   const game = room.game;
   if (skip) {
-    // Optionally notify that turn was skipped
+    // Apply penalty for timeout
+    const currentPlayer = room.players[game.turnIndex];
+    if (currentPlayer && currentPlayer.connected) {
+      currentPlayer.score -= 1;
+      io.to(roomCode).emit('scoreUpdate', getScoreboard(room));
+    }
   }
   // Move to next connected player
   const nextIdx = getNextPlayerIndex(room, game.turnIndex);

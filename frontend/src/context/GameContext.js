@@ -4,7 +4,12 @@ import { io } from 'socket.io-client';
 export const GameContext = createContext();
 
 export function GameProvider({ children }) {
-  const [socket] = useState(() => io('http://localhost:3001'));
+  const [socket] = useState(() => {
+    const serverUrl = process.env.REACT_APP_SERVER_URL || 
+                     (process.env.NODE_ENV === 'production' ? window.location.origin : 'http://localhost:3001');
+    console.log('Connecting to server:', serverUrl);
+    return io(serverUrl);
+  });
   const [user, setUser] = useState(null); // { username, isModerator }
   const [room, setRoom] = useState(null); // room state from backend
   const [roomCode, setRoomCode] = useState(null); // room code
