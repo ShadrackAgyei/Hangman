@@ -18,6 +18,7 @@ function GamePage() {
       setGame(gameData);
       // Update timer if included in game data
       if (gameData && gameData.timerEnd) {
+        console.log('Setting timer from gameUpdate:', gameData.timerEnd);
         setTimerEnd(gameData.timerEnd);
       }
     };
@@ -47,6 +48,14 @@ function GamePage() {
       socket.off('gameOver');
     };
   }, [socket, setGame, setScoreboard, setTimerEnd, navigate]);
+
+  // Initialize timer if game already has timerEnd when component loads
+  useEffect(() => {
+    if (game && game.timerEnd && !timerEnd) {
+      console.log('Initializing timer from existing game data:', game.timerEnd);
+      setTimerEnd(game.timerEnd);
+    }
+  }, [game, timerEnd, setTimerEnd]);
 
   // Smooth timer countdown effect
   useEffect(() => {
