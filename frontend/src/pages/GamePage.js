@@ -15,22 +15,18 @@ function GamePage() {
   // Listen for game/score/timer updates
   useEffect(() => {
     const handleGameUpdate = (gameData) => {
-      console.log('GamePage received gameUpdate:', gameData);
       setGame(gameData);
       // Update timer if included in game data
       if (gameData && gameData.timerEnd) {
-        console.log('Setting timer from gameUpdate:', gameData.timerEnd);
         setTimerEnd(gameData.timerEnd);
       }
     };
     
     const handleTimerUpdate = ({ timerEnd }) => {
-      console.log('GamePage received timerUpdate:', { timerEnd });
       setTimerEnd(timerEnd);
     };
     
     const handleScoreUpdate = (scores) => {
-      console.log('GamePage received scoreUpdate:', scores);
       setScoreboard(scores);
     };
     
@@ -38,7 +34,6 @@ function GamePage() {
     socket.on('scoreUpdate', handleScoreUpdate);
     socket.on('timerUpdate', handleTimerUpdate);
     socket.on('gameOver', (finalScores) => {
-      console.log('GamePage received gameOver:', finalScores);
       setScoreboard(finalScores);
       navigate('/gameover');
     });
@@ -53,7 +48,6 @@ function GamePage() {
   // Initialize timer if game already has timerEnd when component loads
   useEffect(() => {
     if (game && game.timerEnd && !timerEnd) {
-      console.log('Initializing timer from existing game data:', game.timerEnd);
       setTimerEnd(game.timerEnd);
     }
   }, [game, timerEnd, setTimerEnd]);
@@ -179,11 +173,10 @@ function GamePage() {
     },
     alphabetContainer: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(13, 1fr)',
-      gridTemplateRows: 'repeat(2, 1fr)',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(35px, 1fr))',
       gap: '8px',
       marginBottom: '20px',
-      maxWidth: '650px',
+      maxWidth: '600px',
       margin: '0 auto 20px auto'
     },
     letterButton: {

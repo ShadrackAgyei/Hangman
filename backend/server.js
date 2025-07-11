@@ -46,7 +46,6 @@ try {
   const wordListPath = path.join(__dirname, 'wordlist.json');
   const wordListData = fs.readFileSync(wordListPath, 'utf8');
   wordDatabase = JSON.parse(wordListData);
-  console.log('Word database loaded successfully');
 } catch (error) {
   console.error('Error loading word database:', error);
   wordDatabase = {}; // Fallback to empty database
@@ -121,13 +120,12 @@ function setupNextWord(room) {
   room.game.revealed = Array(word.length).fill('_');
   room.game.incorrectGuesses = [];
   room.game.hangmanState = 0;
-  room.game.turnIndex = 0;
   room.game.guessedLetters = [];
   room.game.solved = false;
+  // Note: turnIndex is NOT reset here - it continues from the current player
 }
 
 io.on('connection', (socket) => {
-  console.log('A user connected:', socket.id);
 
   // Moderator creates a room
   socket.on('createRoom', ({ username, roomSize, wordCount }, callback) => {
@@ -183,17 +181,13 @@ io.on('connection', (socket) => {
 
   // Moderator starts the game
   socket.on('startGame', ({ roomCode }, callback) => {
-    console.log('startGame received:', { roomCode, socketId: socket.id });
     const room = rooms[roomCode];
     if (!room || room.moderator.id !== socket.id) {
-      console.log('Authorization failed:', { roomExists: !!room, moderatorId: room?.moderator?.id, socketId: socket.id });
       return callback({ error: 'Not authorized' });
     }
     if (!room.wordList || room.wordList.length === 0) {
-      console.log('No categories selected or words generated');
       return callback({ error: 'No categories selected or words generated' });
     }
-    console.log('Starting game for room:', roomCode);
     // Initialize game state
     room.state = 'playing';
     room.game = {
@@ -210,9 +204,7 @@ io.on('connection', (socket) => {
       timerEnd: null
     };
     setupNextWord(room);
-    console.log('Emitting gameUpdate to room:', roomCode);
     io.to(roomCode).emit('gameUpdate', getGamePublicState(room));
-    console.log('Starting turn timer');
     startTurnTimer(roomCode);
     callback({ success: true });
   });
@@ -353,7 +345,6 @@ io.on('connection', (socket) => {
             
             // If it was the current player's turn, immediately start next turn
             if (wasCurrentPlayer) {
-              console.log('Disconnected player was current turn, starting next turn');
               setTimeout(() => {
                 startTurnTimer(roomCode);
               }, 1000);
@@ -368,7 +359,6 @@ io.on('connection', (socket) => {
         }
       }
     }
-    console.log('User disconnected:', socket.id);
   });
 });
 
@@ -397,10 +387,8 @@ function getScoreboard(room) {
 }
 
 function startTurnTimer(roomCode) {
-  console.log('startTurnTimer called for room:', roomCode);
   const room = rooms[roomCode];
   if (!room || !room.game) {
-    console.log('startTurnTimer: room or game not found');
     return;
   }
   const game = room.game;
@@ -417,11 +405,9 @@ function startTurnTimer(roomCode) {
   }
   
   game.timerEnd = Date.now() + 10000;
-  console.log('Emitting timerUpdate to room:', roomCode, 'timerEnd:', game.timerEnd);
   io.to(roomCode).emit('timerUpdate', { timerEnd: game.timerEnd });
   io.to(roomCode).emit('gameUpdate', getGamePublicState(room));
   game.timer = setTimeout(() => {
-    console.log('Timer expired for room:', roomCode);
     nextTurn(roomCode, true);
   }, 10000);
 }
@@ -466,6 +452,11 @@ function nextWordOrEnd(roomCode) {
   if (room.game.currentWordIndex >= room.wordList.length) {
     endGame(roomCode);
   } else {
+    // Advance to next player for the new word
+    const nextIdx = getNextPlayerIndex(room, room.game.turnIndex);
+    if (nextIdx !== null) {
+      room.game.turnIndex = nextIdx;
+    }
     setupNextWord(room);
     io.to(roomCode).emit('gameUpdate', getGamePublicState(room));
     startTurnTimer(roomCode);
@@ -482,5 +473,5 @@ function endGame(roomCode) {
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+  // Server started
 }); 

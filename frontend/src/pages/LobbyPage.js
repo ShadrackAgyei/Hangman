@@ -37,9 +37,7 @@ function LobbyPage() {
     };
 
     const handleGameUpdate = (gameData) => {
-      console.log('LobbyPage received gameUpdate:', gameData);
       if (gameData && gameData.state === 'playing') {
-        console.log('Game started, navigating to /game');
         // Pre-load game data to avoid delay
         setGame(gameData);
         navigate('/game');
