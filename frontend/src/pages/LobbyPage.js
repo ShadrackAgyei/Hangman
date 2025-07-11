@@ -238,7 +238,7 @@ function LobbyPage() {
               <input 
                 type="number" 
                 min={2} 
-                max={10} 
+                max={20} 
                 value={roomSize} 
                 onChange={e => setRoomSize(Number(e.target.value))}
                 style={{...styles.input, marginBottom: '0'}}
@@ -324,7 +324,7 @@ function LobbyPage() {
             </div>
             {room.players.map((player, idx) => (
               <div key={idx} style={{marginBottom: '4px'}}>
-                👤 {player.username} {player.connected ? '' : '(disconnected)'}
+                👤 {player.username}
               </div>
             ))}
             <div style={{fontSize: '14px', color: '#666', marginTop: '12px'}}>
@@ -358,7 +358,7 @@ function LobbyPage() {
             </div>
             {room.players.map((player, idx) => (
               <div key={idx} style={{marginBottom: '4px'}}>
-                👤 {player.username} {player.connected ? '' : '(disconnected)'}
+                👤 {player.username}
               </div>
             ))}
             <div style={{fontSize: '14px', color: '#666', marginTop: '12px'}}>

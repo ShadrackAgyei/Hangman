@@ -2,28 +2,27 @@ import React, { useState, useContext, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GameContext } from '../context/GameContext';
 
-const CATEGORIES = [
-  'Animals',
-  'Countries',
-  'Movies',
-  'Sports',
-  'Food',
-  'Technology'
-];
-
 function ModeratorPanel({ wordCount, roomCode }) {
   const { socket, room, setRoom } = useContext(GameContext);
-  const [words, setWords] = useState(Array(wordCount).fill(''));
-  const [categories, setCategories] = useState(Array(wordCount).fill(CATEGORIES[0]));
+  const [availableCategories, setAvailableCategories] = useState([]);
+  const [selectedCategories, setSelectedCategories] = useState([]);
   const [error, setError] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+
+  // Load available categories when component mounts
+  useEffect(() => {
+    socket.emit('getCategories', ({ categories }) => {
+      setAvailableCategories(categories);
+      setLoading(false);
+    });
+  }, [socket]);
 
   // Reset form when roomCode changes (new game)
   useEffect(() => {
-    setWords(Array(wordCount).fill(''));
-    setCategories(Array(wordCount).fill(CATEGORIES[0]));
+    setSelectedCategories([]);
     setError('');
     setSubmitted(false);
     setSubmitting(false);
@@ -41,25 +40,23 @@ function ModeratorPanel({ wordCount, roomCode }) {
     };
   }, [socket, setRoom]);
 
-  const handleWordChange = (i, value) => {
-    const newWords = [...words];
-    newWords[i] = value;
-    setWords(newWords);
-  };
-  const handleCategoryChange = (i, value) => {
-    const newCats = [...categories];
-    newCats[i] = value;
-    setCategories(newCats);
+  const handleCategoryToggle = (category) => {
+    setSelectedCategories(prev => {
+      if (prev.includes(category)) {
+        return prev.filter(c => c !== category);
+      } else {
+        return [...prev, category];
+      }
+    });
   };
 
   const handleSubmit = () => {
-    if (words.some(w => !w.trim())) {
-      setError('Please fill in all words.');
+    if (selectedCategories.length === 0) {
+      setError('Please select at least one category.');
       return;
     }
     setSubmitting(true);
-    const wordList = words.map((word, i) => ({ word: word.trim(), category: categories[i] }));
-    socket.emit('submitWords', { roomCode, wordList }, (res) => {
+    socket.emit('submitCategories', { roomCode, categories: selectedCategories, wordCount }, (res) => {
       setSubmitting(false);
       if (res.error) setError(res.error);
       else setSubmitted(true);
@@ -123,11 +120,26 @@ function ModeratorPanel({ wordCount, roomCode }) {
       borderRadius: '8px',
       marginBottom: '30px'
     },
-    wordRow: {
-      display: 'flex',
+    categoryGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
       gap: '12px',
-      marginBottom: '12px',
-      alignItems: 'center'
+      marginBottom: '20px'
+    },
+    categoryOption: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '12px',
+      backgroundColor: '#f9f9f9',
+      borderRadius: '8px',
+      cursor: 'pointer',
+      transition: 'all 0.2s ease',
+      border: '2px solid transparent'
+    },
+    categoryOptionSelected: {
+      backgroundColor: '#e3f2fd',
+      borderColor: '#2196F3'
     },
     wordInput: {
       flex: 2,
@@ -139,6 +151,14 @@ function ModeratorPanel({ wordCount, roomCode }) {
     },
     categorySelect: {
       flex: 1,
+      padding: '12px',
+      fontSize: '16px',
+      border: '2px solid #ddd',
+      borderRadius: '6px',
+      outline: 'none'
+    },
+    hintInput: {
+      width: '100%',
       padding: '12px',
       fontSize: '16px',
       border: '2px solid #ddd',
@@ -203,7 +223,7 @@ function ModeratorPanel({ wordCount, roomCode }) {
           </div>
           {room?.players?.map((player, idx) => (
             <div key={idx} style={{marginBottom: '4px'}}>
-              👤 {player.username} {player.connected ? '' : '(disconnected)'}
+              👤 {player.username}
             </div>
           ))}
           <div style={{fontSize: '14px', color: '#666', marginTop: '12px'}}>
@@ -211,52 +231,64 @@ function ModeratorPanel({ wordCount, roomCode }) {
           </div>
         </div>
 
-        <div style={styles.instructions}>
-          Enter {wordCount} words and select a category for each:
-        </div>
-
-        {Array.from({ length: wordCount }).map((_, i) => (
-          <div key={i} style={styles.wordRow}>
-            <span style={{minWidth: '30px', color: '#666', fontSize: '14px'}}>
-              {i + 1}.
-            </span>
-            <input
-              type="text"
-              placeholder={`Word #${i + 1}`}
-              value={words[i]}
-              onChange={e => handleWordChange(i, e.target.value)}
-              style={{
-                ...styles.wordInput,
-                backgroundColor: submitted ? '#f5f5f5' : 'white'
-              }}
-              disabled={submitted}
-            />
-            <select
-              value={categories[i]}
-              onChange={e => handleCategoryChange(i, e.target.value)}
-              style={{
-                ...styles.categorySelect,
-                backgroundColor: submitted ? '#f5f5f5' : 'white'
-              }}
-              disabled={submitted}
-            >
-              {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-            </select>
+        {loading ? (
+          <div style={styles.instructions}>
+            Loading categories...
           </div>
-        ))}
+        ) : (
+          <>
+            <div style={styles.instructions}>
+              Select categories for the game to randomly choose {wordCount} words from:
+            </div>
+
+            <div style={styles.categoryGrid}>
+              {availableCategories.map(category => {
+                const isSelected = selectedCategories.includes(category);
+                return (
+                  <div
+                    key={category}
+                    style={{
+                      ...styles.categoryOption,
+                      ...(isSelected ? styles.categoryOptionSelected : {}),
+                      ...(submitted ? { cursor: 'not-allowed', opacity: 0.6 } : {})
+                    }}
+                    onClick={() => !submitted && handleCategoryToggle(category)}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => {}}
+                      disabled={submitted}
+                      style={{ pointerEvents: 'none' }}
+                    />
+                    <span style={{ fontSize: '16px', fontWeight: isSelected ? 'bold' : 'normal' }}>
+                      {category}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {selectedCategories.length > 0 && (
+              <div style={{ marginBottom: '20px', textAlign: 'center', color: '#666' }}>
+                Selected: {selectedCategories.join(', ')}
+              </div>
+            )}
+          </>
+        )}
 
         {error && <div style={styles.error}>{error}</div>}
 
-        {!submitted && (
+        {!submitted && !loading && (
           <button 
             onClick={handleSubmit} 
-            disabled={submitting || words.some(w => !w.trim())}
+            disabled={submitting || selectedCategories.length === 0}
             style={{
               ...styles.button,
-              ...(submitting || words.some(w => !w.trim()) ? styles.submitButtonDisabled : styles.submitButton)
+              ...(submitting || selectedCategories.length === 0 ? styles.submitButtonDisabled : styles.submitButton)
             }}
           >
-            {submitting ? 'Submitting...' : 'Submit Words'}
+            {submitting ? 'Generating Words...' : 'Generate Random Words'}
           </button>
         )}
 
