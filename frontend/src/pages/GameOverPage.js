@@ -3,17 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { GameContext } from '../context/GameContext';
 
 function GameOverPage() {
-  const { socket, roomCode, scoreboard, setScoreboard } = useContext(GameContext);
+  const { scoreboard } = useContext(GameContext);
   const navigate = useNavigate();
-
-  const handleRestart = () => {
-    socket.emit('restartGame', { roomCode: roomCode }, (res) => {
-      if (res.success) {
-        setScoreboard([]);
-        navigate('/');
-      }
-    });
-  };
 
   const handleNewGame = () => {
     navigate('/');
@@ -183,10 +174,6 @@ function GameOverPage() {
       transition: 'all 0.3s ease',
       minWidth: '150px'
     },
-    restartButton: {
-      backgroundColor: '#4CAF50',
-      color: 'white'
-    },
     newGameButton: {
       backgroundColor: '#2196F3',
       color: 'white'
@@ -260,14 +247,6 @@ function GameOverPage() {
       )}
 
       <div style={styles.buttonContainer}>
-        <button 
-          onClick={handleRestart}
-          style={{...styles.button, ...styles.restartButton}}
-          onMouseEnter={(e) => e.target.style.backgroundColor = '#45a049'}
-          onMouseLeave={(e) => e.target.style.backgroundColor = '#4CAF50'}
-        >
-          🔄 Play Again
-        </button>
         <button 
           onClick={handleNewGame}
           style={{...styles.button, ...styles.newGameButton}}
