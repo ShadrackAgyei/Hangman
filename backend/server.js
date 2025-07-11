@@ -129,30 +129,40 @@ io.on('connection', (socket) => {
 
   // Moderator creates a room
   socket.on('createRoom', ({ username, roomSize, wordCount }, callback) => {
-    const roomCode = generateRoomCode();
-    rooms[roomCode] = {
-      moderator: { id: socket.id, username },
-      players: [],
-      settings: { roomSize, wordCount },
-      state: 'lobby',
-      wordList: [],
-      category: null,
-      game: null
-    };
-    socket.join(roomCode);
-    callback({ roomCode });
-    io.to(roomCode).emit('roomUpdate', rooms[roomCode]);
+    try {
+      const roomCode = generateRoomCode();
+      rooms[roomCode] = {
+        moderator: { id: socket.id, username },
+        players: [],
+        settings: { roomSize, wordCount },
+        state: 'lobby',
+        wordList: [],
+        category: null,
+        game: null
+      };
+      socket.join(roomCode);
+      callback({ roomCode });
+      io.to(roomCode).emit('roomUpdate', rooms[roomCode]);
+    } catch (error) {
+      console.error('Error creating room:', error);
+      callback({ error: 'Failed to create room' });
+    }
   });
 
   // Player joins a room
   socket.on('joinRoom', ({ roomCode, username }, callback) => {
-    const room = rooms[roomCode];
-    if (!room) return callback({ error: 'Room not found' });
-    if (room.players.length >= room.settings.roomSize) return callback({ error: 'Room is full' });
-    room.players.push({ id: socket.id, username, score: 10 });
-    socket.join(roomCode);
-    callback({ success: true });
-    io.to(roomCode).emit('roomUpdate', room);
+    try {
+      const room = rooms[roomCode];
+      if (!room) return callback({ error: 'Room not found' });
+      if (room.players.length >= room.settings.roomSize) return callback({ error: 'Room is full' });
+      room.players.push({ id: socket.id, username, score: 10 });
+      socket.join(roomCode);
+      callback({ success: true });
+      io.to(roomCode).emit('roomUpdate', room);
+    } catch (error) {
+      console.error('Error joining room:', error);
+      callback({ error: 'Failed to join room' });
+    }
   });
 
   // Moderator submits categories for random word selection
@@ -181,32 +191,40 @@ io.on('connection', (socket) => {
 
   // Moderator starts the game
   socket.on('startGame', ({ roomCode }, callback) => {
-    const room = rooms[roomCode];
-    if (!room || room.moderator.id !== socket.id) {
-      return callback({ error: 'Not authorized' });
+    try {
+      const room = rooms[roomCode];
+      if (!room || room.moderator.id !== socket.id) {
+        return callback({ error: 'Not authorized' });
+      }
+      if (!room.wordList || room.wordList.length === 0) {
+        return callback({ error: 'No categories selected or words generated' });
+      }
+      if (!room.players || room.players.length === 0) {
+        return callback({ error: 'No players in room' });
+      }
+      // Initialize game state
+      room.state = 'playing';
+      room.game = {
+        currentWordIndex: 0,
+        currentWord: '',
+        category: '',
+        revealed: [],
+        incorrectGuesses: [],
+        hangmanState: 0,
+        turnIndex: 0, // index in players array
+        guessedLetters: [],
+        solved: false,
+        timer: null,
+        timerEnd: null
+      };
+      setupNextWord(room);
+      io.to(roomCode).emit('gameUpdate', getGamePublicState(room));
+      startTurnTimer(roomCode);
+      callback({ success: true });
+    } catch (error) {
+      console.error('Error starting game:', error);
+      callback({ error: 'Failed to start game' });
     }
-    if (!room.wordList || room.wordList.length === 0) {
-      return callback({ error: 'No categories selected or words generated' });
-    }
-    // Initialize game state
-    room.state = 'playing';
-    room.game = {
-      currentWordIndex: 0,
-      currentWord: '',
-      category: '',
-      revealed: [],
-      incorrectGuesses: [],
-      hangmanState: 0,
-      turnIndex: 0, // index in players array
-      guessedLetters: [],
-      solved: false,
-      timer: null,
-      timerEnd: null
-    };
-    setupNextWord(room);
-    io.to(roomCode).emit('gameUpdate', getGamePublicState(room));
-    startTurnTimer(roomCode);
-    callback({ success: true });
   });
 
   // Player guesses a letter
@@ -310,54 +328,62 @@ io.on('connection', (socket) => {
 
   // Handle disconnects
   socket.on('disconnect', () => {
-    for (const [roomCode, room] of Object.entries(rooms)) {
-      if (room.moderator.id === socket.id) {
-        // If moderator disconnects, close the room
-        io.to(roomCode).emit('roomClosed');
-        delete rooms[roomCode];
-      } else {
-        const playerIndex = room.players.findIndex(p => p.id === socket.id);
-        if (playerIndex !== -1) {
-          const wasCurrentPlayer = room.state === 'playing' && room.game && room.game.turnIndex === playerIndex;
-          
-          // Remove player completely from the room
-          room.players.splice(playerIndex, 1);
-          
-          // Update turn index if necessary
-          if (room.state === 'playing' && room.game && room.game.turnIndex !== undefined) {
-            if (playerIndex < room.game.turnIndex) {
-              // Removed player was before current turn, adjust turn index
-              room.game.turnIndex--;
-            } else if (wasCurrentPlayer) {
-              // Removed player was current turn, keep same index (will be next player)
-              // But adjust if we're now beyond the array bounds
-              if (room.game.turnIndex >= room.players.length) {
-                room.game.turnIndex = 0;
+    try {
+      for (const [roomCode, room] of Object.entries(rooms)) {
+        if (!room) continue;
+        
+        if (room.moderator && room.moderator.id === socket.id) {
+          // If moderator disconnects, close the room
+          io.to(roomCode).emit('roomClosed');
+          delete rooms[roomCode];
+        } else if (room.players && Array.isArray(room.players)) {
+          const playerIndex = room.players.findIndex(p => p && p.id === socket.id);
+          if (playerIndex !== -1) {
+            const wasCurrentPlayer = room.state === 'playing' && room.game && room.game.turnIndex === playerIndex;
+            
+            // Remove player completely from the room
+            room.players.splice(playerIndex, 1);
+            
+            // Update turn index if necessary
+            if (room.state === 'playing' && room.game && room.game.turnIndex !== undefined) {
+              if (playerIndex < room.game.turnIndex) {
+                // Removed player was before current turn, adjust turn index
+                room.game.turnIndex--;
+              } else if (wasCurrentPlayer) {
+                // Removed player was current turn, keep same index (will be next player)
+                // But adjust if we're now beyond the array bounds
+                if (room.game.turnIndex >= room.players.length) {
+                  room.game.turnIndex = 0;
+                }
+                if (room.game.timer) {
+                  clearTimeout(room.game.timer);
+                }
               }
-              clearTimeout(room.game.timer);
+              
+              // Check if any players are left
+              if (room.players.length === 0) {
+                endGame(roomCode);
+                continue;
+              }
+              
+              // If it was the current player's turn, immediately start next turn
+              if (wasCurrentPlayer) {
+                setTimeout(() => {
+                  startTurnTimer(roomCode);
+                }, 1000);
+              }
             }
             
-            // Check if any players are left
-            if (room.players.length === 0) {
-              endGame(roomCode);
-              return;
+            io.to(roomCode).emit('roomUpdate', room);
+            if (room.state === 'playing' && room.game) {
+              io.to(roomCode).emit('scoreUpdate', getScoreboard(room));
+              io.to(roomCode).emit('gameUpdate', getGamePublicState(room));
             }
-            
-            // If it was the current player's turn, immediately start next turn
-            if (wasCurrentPlayer) {
-              setTimeout(() => {
-                startTurnTimer(roomCode);
-              }, 1000);
-            }
-          }
-          
-          io.to(roomCode).emit('roomUpdate', room);
-          if (room.state === 'playing' && room.game) {
-            io.to(roomCode).emit('scoreUpdate', getScoreboard(room));
-            io.to(roomCode).emit('gameUpdate', getGamePublicState(room));
           }
         }
       }
+    } catch (error) {
+      console.error('Error handling disconnect:', error);
     }
   });
 });
@@ -387,91 +413,143 @@ function getScoreboard(room) {
 }
 
 function startTurnTimer(roomCode) {
-  const room = rooms[roomCode];
-  if (!room || !room.game) {
-    return;
+  try {
+    const room = rooms[roomCode];
+    if (!room || !room.game) {
+      return;
+    }
+    const game = room.game;
+    
+    // Check if there are any players left
+    if (!room.players || room.players.length === 0) {
+      endGame(roomCode);
+      return;
+    }
+    
+    // Ensure turn index is valid
+    if (game.turnIndex >= room.players.length) {
+      game.turnIndex = 0;
+    }
+    
+    // Clear any existing timer
+    if (game.timer) {
+      clearTimeout(game.timer);
+    }
+    
+    game.timerEnd = Date.now() + 10000;
+    io.to(roomCode).emit('timerUpdate', { timerEnd: game.timerEnd });
+    io.to(roomCode).emit('gameUpdate', getGamePublicState(room));
+    game.timer = setTimeout(() => {
+      nextTurn(roomCode, true);
+    }, 10000);
+  } catch (error) {
+    console.error('Error in startTurnTimer:', error);
+    // Try to recover by ending the game
+    try {
+      endGame(roomCode);
+    } catch (endError) {
+      console.error('Error ending game after timer error:', endError);
+    }
   }
-  const game = room.game;
-  
-  // Check if there are any players left
-  if (room.players.length === 0) {
-    endGame(roomCode);
-    return;
-  }
-  
-  // Ensure turn index is valid
-  if (game.turnIndex >= room.players.length) {
-    game.turnIndex = 0;
-  }
-  
-  game.timerEnd = Date.now() + 10000;
-  io.to(roomCode).emit('timerUpdate', { timerEnd: game.timerEnd });
-  io.to(roomCode).emit('gameUpdate', getGamePublicState(room));
-  game.timer = setTimeout(() => {
-    nextTurn(roomCode, true);
-  }, 10000);
 }
 
 function nextTurn(roomCode, skip = false) {
-  const room = rooms[roomCode];
-  if (!room || !room.game) return;
-  const game = room.game;
-  
-  // Check if there are any players left
-  if (room.players.length === 0) {
-    endGame(roomCode);
-    return;
-  }
-  
-  if (skip) {
-    // Apply penalty for timeout
-    const currentPlayer = room.players[game.turnIndex];
-    if (currentPlayer) {
-      currentPlayer.score -= 1;
-      io.to(roomCode).emit('scoreUpdate', getScoreboard(room));
+  try {
+    const room = rooms[roomCode];
+    if (!room || !room.game) return;
+    const game = room.game;
+    
+    // Check if there are any players left
+    if (!room.players || room.players.length === 0) {
+      endGame(roomCode);
+      return;
+    }
+    
+    if (skip) {
+      // Apply penalty for timeout
+      const currentPlayer = room.players[game.turnIndex];
+      if (currentPlayer) {
+        currentPlayer.score -= 1;
+        io.to(roomCode).emit('scoreUpdate', getScoreboard(room));
+      }
+    }
+    
+    // Move to next player
+    const nextIdx = getNextPlayerIndex(room, game.turnIndex);
+    if (nextIdx === null) {
+      // No players left, end game
+      endGame(roomCode);
+      return;
+    }
+    game.turnIndex = nextIdx;
+    game.timerEnd = null;
+    io.to(roomCode).emit('gameUpdate', getGamePublicState(room));
+    startTurnTimer(roomCode);
+  } catch (error) {
+    console.error('Error in nextTurn:', error);
+    try {
+      endGame(roomCode);
+    } catch (endError) {
+      console.error('Error ending game after nextTurn error:', endError);
     }
   }
-  
-  // Move to next player
-  const nextIdx = getNextPlayerIndex(room, game.turnIndex);
-  if (nextIdx === null) {
-    // No players left, end game
-    endGame(roomCode);
-    return;
-  }
-  game.turnIndex = nextIdx;
-  game.timerEnd = null;
-  io.to(roomCode).emit('gameUpdate', getGamePublicState(room));
-  startTurnTimer(roomCode);
 }
 
 function nextWordOrEnd(roomCode) {
-  const room = rooms[roomCode];
-  if (!room || !room.game) return;
-  room.game.currentWordIndex++;
-  if (room.game.currentWordIndex >= room.wordList.length) {
-    endGame(roomCode);
-  } else {
-    // Advance to next player for the new word
-    const nextIdx = getNextPlayerIndex(room, room.game.turnIndex);
-    if (nextIdx !== null) {
-      room.game.turnIndex = nextIdx;
+  try {
+    const room = rooms[roomCode];
+    if (!room || !room.game) return;
+    
+    room.game.currentWordIndex++;
+    if (room.game.currentWordIndex >= room.wordList.length) {
+      endGame(roomCode);
+    } else {
+      // Advance to next player for the new word
+      const nextIdx = getNextPlayerIndex(room, room.game.turnIndex);
+      if (nextIdx !== null) {
+        room.game.turnIndex = nextIdx;
+      }
+      setupNextWord(room);
+      io.to(roomCode).emit('gameUpdate', getGamePublicState(room));
+      startTurnTimer(roomCode);
     }
-    setupNextWord(room);
-    io.to(roomCode).emit('gameUpdate', getGamePublicState(room));
-    startTurnTimer(roomCode);
+  } catch (error) {
+    console.error('Error in nextWordOrEnd:', error);
+    try {
+      endGame(roomCode);
+    } catch (endError) {
+      console.error('Error ending game after nextWordOrEnd error:', endError);
+    }
   }
 }
 
 function endGame(roomCode) {
-  const room = rooms[roomCode];
-  if (!room) return;
-  room.state = 'finished';
-  if (room.game && room.game.timer) clearTimeout(room.game.timer);
-  io.to(roomCode).emit('gameOver', getScoreboard(room));
+  try {
+    const room = rooms[roomCode];
+    if (!room) return;
+    room.state = 'finished';
+    if (room.game && room.game.timer) {
+      clearTimeout(room.game.timer);
+      room.game.timer = null;
+    }
+    io.to(roomCode).emit('gameOver', getScoreboard(room));
+  } catch (error) {
+    console.error('Error in endGame:', error);
+  }
 }
+
+// Global error handlers
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  // Don't exit the process in production, just log the error
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit the process in production, just log the error
+});
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  // Server started
+  console.log(`Server started on port ${PORT}`);
 }); 
