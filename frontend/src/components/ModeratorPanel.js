@@ -64,14 +64,11 @@ function ModeratorPanel({ wordCount, roomCode }) {
   };
 
   const handleStartGame = () => {
-    console.log('Starting game for room:', roomCode);
     socket.emit('startGame', { roomCode }, (res) => {
-      console.log('Start game response:', res);
       if (res.error) {
         setError(res.error);
       } else {
         // Navigation will be handled by the gameUpdate event listener
-        console.log('Game started successfully');
       }
     });
   };

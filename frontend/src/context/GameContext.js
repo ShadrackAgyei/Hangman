@@ -7,7 +7,6 @@ export function GameProvider({ children }) {
   const [socket] = useState(() => {
     const serverUrl = process.env.REACT_APP_SERVER_URL || 
                      (process.env.NODE_ENV === 'production' ? window.location.origin : 'http://localhost:3001');
-    console.log('Connecting to server:', serverUrl);
     return io(serverUrl);
   });
   const [user, setUser] = useState(null); // { username, isModerator }
@@ -20,11 +19,9 @@ export function GameProvider({ children }) {
   // Set up global socket listeners for debugging
   React.useEffect(() => {
     socket.on('connect', () => {
-      console.log('Socket connected:', socket.id);
     });
     
     socket.on('disconnect', () => {
-      console.log('Socket disconnected');
     });
 
     return () => {
