@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const { Server } = require('socket.io');
 
 const app = express();
@@ -39,6 +40,18 @@ app.get('/health', (req, res) => res.send('OK'));
 // In-memory store for rooms and users
 const rooms = {}; // { roomCode: { moderator, players: [], settings, state } }
 
+// Load word list from JSON file
+let wordDatabase = {};
+try {
+  const wordListPath = path.join(__dirname, 'wordlist.json');
+  const wordListData = fs.readFileSync(wordListPath, 'utf8');
+  wordDatabase = JSON.parse(wordListData);
+  console.log('Word database loaded successfully');
+} catch (error) {
+  console.error('Error loading word database:', error);
+  wordDatabase = {}; // Fallback to empty database
+}
+
 // Utility to generate a unique 6-letter room code
 function generateRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -47,14 +60,38 @@ function generateRoomCode() {
   return code;
 }
 
+// Function to randomly select words from chosen categories
+function selectRandomWords(categories, wordCount) {
+  const selectedWords = [];
+  const availableWords = [];
+  
+  // Collect all words from selected categories
+  categories.forEach(category => {
+    if (wordDatabase[category]) {
+      wordDatabase[category].forEach(wordObj => {
+        availableWords.push({
+          word: wordObj.word,
+          category: category,
+          hint: wordObj.hint
+        });
+      });
+    }
+  });
+  
+  // Shuffle and select requested number of words
+  for (let i = 0; i < wordCount && availableWords.length > 0; i++) {
+    const randomIndex = Math.floor(Math.random() * availableWords.length);
+    selectedWords.push(availableWords.splice(randomIndex, 1)[0]);
+  }
+  
+  return selectedWords;
+}
+
 // Helper: Get next active player index
 function getNextPlayerIndex(room, currentIndex) {
   const n = room.players.length;
-  for (let i = 1; i <= n; i++) {
-    const idx = (currentIndex + i) % n;
-    if (room.players[idx].connected) return idx;
-  }
-  return null; // All disconnected
+  if (n === 0) return null; // No players left
+  return (currentIndex + 1) % n;
 }
 
 // Helper: Reveal letter in word
@@ -80,6 +117,7 @@ function setupNextWord(room) {
   const word = wordObj.word;
   room.game.currentWord = word;
   room.game.category = wordObj.category;
+  room.game.hint = wordObj.hint || '';
   room.game.revealed = Array(word.length).fill('_');
   room.game.incorrectGuesses = [];
   room.game.hangmanState = 0;
@@ -113,20 +151,34 @@ io.on('connection', (socket) => {
     const room = rooms[roomCode];
     if (!room) return callback({ error: 'Room not found' });
     if (room.players.length >= room.settings.roomSize) return callback({ error: 'Room is full' });
-    room.players.push({ id: socket.id, username, score: 10, connected: true });
+    room.players.push({ id: socket.id, username, score: 10 });
     socket.join(roomCode);
     callback({ success: true });
     io.to(roomCode).emit('roomUpdate', room);
   });
 
-  // Moderator submits word list and categories
-  socket.on('submitWords', ({ roomCode, wordList }, callback) => {
+  // Moderator submits categories for random word selection
+  socket.on('submitCategories', ({ roomCode, categories, wordCount }, callback) => {
     const room = rooms[roomCode];
     if (!room || room.moderator.id !== socket.id) return callback({ error: 'Not authorized' });
-    // wordList: [{ word: 'tiger', category: 'Animals' }, ...]
-    room.wordList = wordList;
+    
+    // Generate random word list from selected categories
+    const selectedWords = selectRandomWords(categories, wordCount);
+    
+    if (selectedWords.length < wordCount) {
+      return callback({ error: `Not enough words available. Found ${selectedWords.length} words, need ${wordCount}` });
+    }
+    
+    room.wordList = selectedWords;
+    room.selectedCategories = categories;
     io.to(roomCode).emit('roomUpdate', room);
     callback({ success: true });
+  });
+
+  // Get available categories (for frontend)
+  socket.on('getCategories', (callback) => {
+    const categories = Object.keys(wordDatabase);
+    callback({ categories });
   });
 
   // Moderator starts the game
@@ -138,8 +190,8 @@ io.on('connection', (socket) => {
       return callback({ error: 'Not authorized' });
     }
     if (!room.wordList || room.wordList.length === 0) {
-      console.log('No words submitted');
-      return callback({ error: 'No words submitted' });
+      console.log('No categories selected or words generated');
+      return callback({ error: 'No categories selected or words generated' });
     }
     console.log('Starting game for room:', roomCode);
     // Initialize game state
@@ -239,7 +291,7 @@ io.on('connection', (socket) => {
     const room = rooms[roomCode];
     if (!room) return callback({ error: 'Room not found' });
     // Reset scores and state
-    room.players.forEach(p => { p.score = 10; p.connected = true; });
+    room.players.forEach(p => { p.score = 10; });
     room.state = 'lobby';
     room.wordList = [];
     room.game = null;
@@ -247,20 +299,21 @@ io.on('connection', (socket) => {
     callback({ success: true });
   });
 
-  // Player reconnects
+  // Player reconnects (now just joins as a new player since disconnected players are removed)
   socket.on('reconnectPlayer', ({ roomCode, username }, callback) => {
     const room = rooms[roomCode];
     if (!room) return callback({ error: 'Room not found' });
-    const player = room.players.find(p => p.username === username);
-    if (player) {
-      player.id = socket.id;
-      player.connected = true;
-      socket.join(roomCode);
-      io.to(roomCode).emit('roomUpdate', room);
-      callback({ success: true });
-    } else {
-      callback({ error: 'Player not found' });
+    
+    // Since disconnected players are removed, treat this as a new join
+    if (room.players.length >= room.settings.roomSize) {
+      return callback({ error: 'Room is full' });
     }
+    
+    // Add as new player
+    room.players.push({ id: socket.id, username, score: 10 });
+    socket.join(roomCode);
+    io.to(roomCode).emit('roomUpdate', room);
+    callback({ success: true });
   });
 
   // Handle disconnects
@@ -271,10 +324,47 @@ io.on('connection', (socket) => {
         io.to(roomCode).emit('roomClosed');
         delete rooms[roomCode];
       } else {
-        const player = room.players.find(p => p.id === socket.id);
-        if (player) {
-          player.connected = false;
+        const playerIndex = room.players.findIndex(p => p.id === socket.id);
+        if (playerIndex !== -1) {
+          const wasCurrentPlayer = room.state === 'playing' && room.game && room.game.turnIndex === playerIndex;
+          
+          // Remove player completely from the room
+          room.players.splice(playerIndex, 1);
+          
+          // Update turn index if necessary
+          if (room.state === 'playing' && room.game && room.game.turnIndex !== undefined) {
+            if (playerIndex < room.game.turnIndex) {
+              // Removed player was before current turn, adjust turn index
+              room.game.turnIndex--;
+            } else if (wasCurrentPlayer) {
+              // Removed player was current turn, keep same index (will be next player)
+              // But adjust if we're now beyond the array bounds
+              if (room.game.turnIndex >= room.players.length) {
+                room.game.turnIndex = 0;
+              }
+              clearTimeout(room.game.timer);
+            }
+            
+            // Check if any players are left
+            if (room.players.length === 0) {
+              endGame(roomCode);
+              return;
+            }
+            
+            // If it was the current player's turn, immediately start next turn
+            if (wasCurrentPlayer) {
+              console.log('Disconnected player was current turn, starting next turn');
+              setTimeout(() => {
+                startTurnTimer(roomCode);
+              }, 1000);
+            }
+          }
+          
           io.to(roomCode).emit('roomUpdate', room);
+          if (room.state === 'playing' && room.game) {
+            io.to(roomCode).emit('scoreUpdate', getScoreboard(room));
+            io.to(roomCode).emit('gameUpdate', getGamePublicState(room));
+          }
         }
       }
     }
@@ -290,6 +380,7 @@ function getGamePublicState(room) {
     currentWordIndex: g.currentWordIndex,
     totalWords: room.wordList.length,
     category: g.category,
+    hint: g.hint,
     revealed: g.revealed,
     incorrectGuesses: g.incorrectGuesses,
     hangmanState: g.hangmanState,
@@ -302,7 +393,7 @@ function getGamePublicState(room) {
 }
 
 function getScoreboard(room) {
-  return room.players.map(p => ({ username: p.username, score: p.score, connected: p.connected }));
+  return room.players.map(p => ({ username: p.username, score: p.score, connected: true }));
 }
 
 function startTurnTimer(roomCode) {
@@ -313,31 +404,52 @@ function startTurnTimer(roomCode) {
     return;
   }
   const game = room.game;
-  game.timerEnd = Date.now() + 5000;
+  
+  // Check if there are any players left
+  if (room.players.length === 0) {
+    endGame(roomCode);
+    return;
+  }
+  
+  // Ensure turn index is valid
+  if (game.turnIndex >= room.players.length) {
+    game.turnIndex = 0;
+  }
+  
+  game.timerEnd = Date.now() + 10000;
   console.log('Emitting timerUpdate to room:', roomCode, 'timerEnd:', game.timerEnd);
   io.to(roomCode).emit('timerUpdate', { timerEnd: game.timerEnd });
+  io.to(roomCode).emit('gameUpdate', getGamePublicState(room));
   game.timer = setTimeout(() => {
     console.log('Timer expired for room:', roomCode);
     nextTurn(roomCode, true);
-  }, 5000);
+  }, 10000);
 }
 
 function nextTurn(roomCode, skip = false) {
   const room = rooms[roomCode];
   if (!room || !room.game) return;
   const game = room.game;
+  
+  // Check if there are any players left
+  if (room.players.length === 0) {
+    endGame(roomCode);
+    return;
+  }
+  
   if (skip) {
     // Apply penalty for timeout
     const currentPlayer = room.players[game.turnIndex];
-    if (currentPlayer && currentPlayer.connected) {
+    if (currentPlayer) {
       currentPlayer.score -= 1;
       io.to(roomCode).emit('scoreUpdate', getScoreboard(room));
     }
   }
-  // Move to next connected player
+  
+  // Move to next player
   const nextIdx = getNextPlayerIndex(room, game.turnIndex);
   if (nextIdx === null) {
-    // All players disconnected, end game
+    // No players left, end game
     endGame(roomCode);
     return;
   }

@@ -2,6 +2,7 @@ import React, { useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GameContext } from '../context/GameContext';
 import ModeratorPanel from '../components/ModeratorPanel';
+import HangmanAnimation from '../components/HangmanAnimation';
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
@@ -134,6 +135,16 @@ function GamePage() {
       color: '#666',
       marginBottom: '10px'
     },
+    hint: {
+      fontSize: '18px',
+      color: '#2196F3',
+      marginBottom: '10px',
+      fontStyle: 'italic',
+      backgroundColor: '#f0f8ff',
+      padding: '8px 12px',
+      borderRadius: '6px',
+      border: '1px solid #e3f2fd'
+    },
     progress: {
       fontSize: '14px',
       color: '#888'
@@ -168,10 +179,11 @@ function GamePage() {
     },
     alphabetContainer: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(40px, 1fr))',
+      gridTemplateColumns: 'repeat(13, 1fr)',
+      gridTemplateRows: 'repeat(2, 1fr)',
       gap: '8px',
       marginBottom: '20px',
-      maxWidth: '500px',
+      maxWidth: '650px',
       margin: '0 auto 20px auto'
     },
     letterButton: {
@@ -243,10 +255,15 @@ function GamePage() {
       <div style={styles.gameCard}>
         <div style={styles.header}>
           <div style={styles.category}>Category: {game.category}</div>
+          {game.hint && (
+            <div style={styles.hint}>Hint: {game.hint}</div>
+          )}
           <div style={styles.progress}>
             Word {game.currentWordIndex + 1} of {game.totalWords}
           </div>
         </div>
+
+        <HangmanAnimation hangmanState={game.hangmanState || 0} />
 
         <div style={styles.wordDisplay}>
           {game.revealed?.map((letter, i) => (
@@ -303,7 +320,6 @@ function GamePage() {
               color: player.username === user.username ? '#4CAF50' : '#333'
             }}>
               {player.username === user.username ? `${player.username} (You)` : player.username}
-              {!player.connected && <span style={{color: '#999', fontSize: '12px'}}> (disconnected)</span>}
             </div>
             <div style={styles.playerScore}>{player.score}</div>
           </div>
